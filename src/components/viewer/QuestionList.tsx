@@ -1,36 +1,85 @@
 // src/components/viewer/QuestionList.tsx
-import React from 'react';
+import React, { useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useExam, QuestionData } from '@/store/ExamContext';
 import { ChevronDownIcon } from '../icons';
 import { cn } from '@/lib/utils';
 
 export function QuestionList() {
-  const { questions, activeQuestionId, setActiveQuestionId } = useExam();
+  const { questions, activeQuestionId, setActiveQuestionId, setAnswerFile, setStep } = useExam();
+
+  // Calculate live score
+  const totalAwarded = useMemo(() => questions.reduce((acc, q) => acc + q.marksAwarded, 0), [questions]);
+  const totalMax = useMemo(() => questions.reduce((acc, q) => acc + q.maxMarks, 0), [questions]);
+  const percentage = Math.round((totalAwarded / totalMax) * 100) || 0;
+
+  // The "Evaluate Next Student" handler
+  const handleNextStudent = () => {
+    // 1. Clear the answer sheet
+    setAnswerFile(null);
+    // 2. Clear active question
+    setActiveQuestionId(null);
+    // 3. Reset step to upload screen (question paper will remain loaded!)
+    setStep('upload');
+  };
 
   return (
-    <div className="flex-1 overflow-y-auto bg-gray-50/30 px-4 md:px-6 py-4 md:py-6">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="font-bold text-gray-900">Extracted Questions <span className="text-gray-500 font-normal text-sm">(from question paper)</span></h2>
-        <button className="text-xs font-medium text-gray-500 bg-white border border-gray-200 px-3 py-1.5 rounded-full hover:bg-gray-50 transition-colors shadow-sm">
-          Expand All
-        </button>
+    <div className="flex flex-col h-full bg-gray-50/30">
+      {/* Scrollable Questions Area */}
+      <div className="flex-1 overflow-y-auto px-4 md:px-6 py-4 md:py-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-bold text-gray-900">Extracted Questions <span className="text-gray-500 font-normal text-sm">(from question paper)</span></h2>
+          <button className="text-xs font-medium text-gray-500 bg-white border border-gray-200 px-3 py-1.5 rounded-full hover:bg-gray-50 transition-colors shadow-sm">
+            Expand All
+          </button>
+        </div>
+
+        <div className="space-y-3 pb-6">
+          {questions.map((q) => (
+            <QuestionCard 
+              key={q.id} 
+              question={q} 
+              isActive={activeQuestionId === q.id}
+              onClick={() => setActiveQuestionId(activeQuestionId === q.id ? null : q.id)}
+            />
+          ))}
+        </div>
       </div>
 
-      <div className="space-y-3 pb-20">
-        {questions.map((q) => (
-          <QuestionCard 
-            key={q.id} 
-            question={q} 
-            isActive={activeQuestionId === q.id}
-            onClick={() => setActiveQuestionId(activeQuestionId === q.id ? null : q.id)}
-          />
-        ))}
+      {/* NEW: Sticky Footer for Tally and Next Student */}
+      <div className="bg-white border-t border-gray-200 p-4 shrink-0 shadow-[0_-4px_20px_rgba(0,0,0,0.02)] z-10">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <p className="text-sm text-gray-500 font-medium mb-1">Total Score</p>
+            <div className="flex items-baseline gap-2">
+              <span className="text-2xl font-bold text-gray-900">{totalAwarded}</span>
+              <span className="text-gray-400 font-medium">/ {totalMax}</span>
+              <span className={cn(
+                "ml-2 text-xs font-bold px-2 py-0.5 rounded-full",
+                percentage >= 80 ? "bg-green-100 text-green-700" : percentage >= 50 ? "bg-yellow-100 text-yellow-700" : "bg-red-100 text-red-700"
+              )}>
+                {percentage}%
+              </span>
+            </div>
+          </div>
+          
+          <button className="text-sm text-[#FF5A36] font-semibold hover:underline">
+            Export CSV
+          </button>
+        </div>
+
+        <button 
+          onClick={handleNextStudent}
+          className="w-full py-3 bg-[#2A2A2B] hover:bg-black text-white rounded-xl font-medium transition-colors shadow-sm flex items-center justify-center gap-2"
+        >
+          Evaluate Next Answer Sheet <span>→</span>
+        </button>
       </div>
     </div>
   );
 }
 
+// ... Keep the existing QuestionCard function exactly as it is below this ...
 function QuestionCard({ question, isActive, onClick }: { question: QuestionData, isActive: boolean, onClick: () => void }) {
   const isFullMarks = question.marksAwarded === question.maxMarks;
   const isZero = question.marksAwarded === 0;
