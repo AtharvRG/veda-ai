@@ -18,8 +18,9 @@ export function MobileTopbar() {
           <span className="absolute top-1.5 right-1.5 w-2.5 h-2.5 bg-[#FF5A36] border-2 border-white rounded-full"></span>
         </button>
         
-        {/* Placeholder Avatar */}
+{/* Placeholder Avatar */}
         <div className="w-8 h-8 bg-gray-200 rounded-full overflow-hidden shrink-0">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Madhur" alt="Avatar" className="w-full h-full object-cover" />
         </div>
         

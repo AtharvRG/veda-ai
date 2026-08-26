@@ -1,7 +1,6 @@
 // src/components/upload/FileDropzone.tsx
 import React, { useRef } from 'react';
 import { UploadIcon, FilePdfIcon, XIcon } from '../icons';
-import { cn } from '@/lib/utils';
 
 type Props = {
   type: 'question' | 'answer';
@@ -57,7 +56,7 @@ export function FileDropzone({ type, file, onUpload, onClear }: Props) {
         type="file" 
         ref={inputRef} 
         onChange={handleFileChange} 
-        accept="application/pdf" 
+        accept="application/pdf,image/png,image/jpeg,image/jpg" 
         className="hidden" 
       />
       <div className="w-10 h-10 bg-gray-50 rounded-lg flex items-center justify-center text-gray-600 mb-3 group-hover:bg-orange-100 group-hover:text-[#FF5A36] transition-colors">

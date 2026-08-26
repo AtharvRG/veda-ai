@@ -81,8 +81,9 @@ export function QuestionList() {
 
 // ... Keep the existing QuestionCard function exactly as it is below this ...
 function QuestionCard({ question, isActive, onClick }: { question: QuestionData, isActive: boolean, onClick: () => void }) {
-  const isFullMarks = question.marksAwarded === question.maxMarks;
+  const isFullMarks = question.maxMarks > 0 && question.marksAwarded === question.maxMarks;
   const isZero = question.marksAwarded === 0;
+  const isUnanswered = question.answered === false;
 
   return (
     <div 
@@ -94,20 +95,28 @@ function QuestionCard({ question, isActive, onClick }: { question: QuestionData,
     >
       <div className="p-4 flex gap-4">
         {/* Number Badge */}
-        <div className="w-8 h-8 rounded-full bg-gray-600 text-white font-bold flex items-center justify-center shrink-0 text-sm">
+        <div className={cn(
+          "w-8 h-8 rounded-full text-white font-bold flex items-center justify-center shrink-0 text-sm",
+          isUnanswered ? "bg-gray-300" : "bg-gray-600"
+        )}>
           {question.number}
         </div>
         
         {/* Content */}
         <div className="flex-1">
           <p className="text-sm text-gray-700 leading-relaxed pr-2">{question.text}</p>
+          {isUnanswered && (
+            <span className="inline-block mt-1 text-[10px] font-semibold uppercase tracking-wide text-gray-400 bg-gray-100 px-2 py-0.5 rounded-full">
+              Not answered
+            </span>
+          )}
         </div>
         
         {/* Score & Expand */}
         <div className="flex items-start gap-3 shrink-0">
           <div className={cn(
             "px-2 py-1 rounded font-bold text-sm",
-            isFullMarks ? "bg-green-100 text-green-700" : isZero ? "bg-red-100 text-red-600" : "bg-yellow-100 text-yellow-700"
+            isUnanswered ? "bg-gray-100 text-gray-400" : isFullMarks ? "bg-green-100 text-green-700" : isZero ? "bg-red-100 text-red-600" : "bg-yellow-100 text-yellow-700"
           )}>
             {question.marksAwarded}/{question.maxMarks}
           </div>

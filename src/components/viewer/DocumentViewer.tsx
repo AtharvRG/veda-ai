@@ -1,6 +1,6 @@
 // src/components/viewer/DocumentViewer.tsx
 'use client';
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import { useExam } from '@/store/ExamContext';
 import { ZoomInIcon, ZoomOutIcon } from '../icons';
@@ -19,17 +19,23 @@ export function DocumentViewer() {
 
   // Find the active question to get its bounding box
   const activeQuestion = questions.find(q => q.id === activeQuestionId);
+  const activeBboxes = useMemo(
+    () => activeQuestion?.bboxes ?? (activeQuestion?.bbox ? [activeQuestion.bbox] : []),
+    [activeQuestion]
+  );
 
   // Automatically switch pages if the clicked question is on a different page
-  useEffect(() => {
-    if (activeQuestion?.bbox && activeQuestion.bbox.page !== pageNumber) {
-      setPageNumber(activeQuestion.bbox.page);
+useEffect(() => {
+    if (activeBboxes[0] && activeBboxes[0].page !== pageNumber) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setPageNumber(activeBboxes[0].page);
     }
-  }, [activeQuestion, pageNumber]);
+  }, [activeBboxes, pageNumber]);
 
-  useEffect(() => {
+useEffect(() => {
     if (answerFile) {
       const url = URL.createObjectURL(answerFile);
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setFileUrl(url);
       return () => URL.revokeObjectURL(url);
     }
@@ -96,26 +102,26 @@ export function DocumentViewer() {
               
               {/* Highlight Bounding Box Overlay */}
               <AnimatePresence>
-                {activeQuestion?.bbox && activeQuestion.bbox.page === pageNumber && (
+                {activeBboxes.filter((bbox) => bbox.page === pageNumber).map((bbox, index) => (
                   <motion.div
+                    key={`${bbox.page}-${bbox.top}-${index}`}
                     initial={{ opacity: 0, scale: 0.98 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0 }}
                     transition={{ type: "spring", stiffness: 300, damping: 25 }}
                     className="absolute z-50 pointer-events-none rounded-md border-[3px] border-[#22C55E] bg-[#22C55E]/15 shadow-[0_0_15px_rgba(34,197,94,0.3)]"
                     style={{
-                      top: activeQuestion.bbox.top,
-                      left: activeQuestion.bbox.left,
-                      width: activeQuestion.bbox.width,
-                      height: activeQuestion.bbox.height,
+                      top: bbox.top,
+                      left: bbox.left,
+                      width: bbox.width,
+                      height: bbox.height,
                     }}
                   >
-                    {/* The green Q2 Badge */}
                     <div className="absolute -top-3 -left-3 bg-[#22C55E] text-white font-bold text-xs px-2 py-1 rounded-md shadow-sm">
-                      Q{activeQuestion.number}
+                      Q{activeQuestion?.number}
                     </div>
                   </motion.div>
-                )}
+                ))}
               </AnimatePresence>
             </div>
           </Document>
