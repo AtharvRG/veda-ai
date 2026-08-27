@@ -163,17 +163,18 @@ export async function getLineBoxes(file: { type: string; arrayBuffer: () => Prom
     }
   } else {
     // Single image: one "page". Tesseract reads width/height from the image.
-    const { data } = await worker.recognize(bytes, {}, { blocks: true } as never);
-    const width = data.image_width;
-    const height = data.image_height;
-    const blocks = (data.blocks ?? []) as Array<{
+    const { data } = await worker.recognize(Buffer.from(bytes), {}, { blocks: true } as never);
+    const imgData = data as unknown as { image_width?: number; image_height?: number; blocks?: Array<{
       paragraphs?: Array<{
         lines?: Array<{
           text?: string;
           bbox?: { x0: number; y0: number; x1: number; y1: number };
         }>;
       }>;
-    }>;
+    }> };
+    const width = imgData.image_width ?? 0;
+    const height = imgData.image_height ?? 0;
+    const blocks = imgData.blocks ?? [];
     for (const block of blocks) {
       for (const para of block.paragraphs ?? []) {
         for (const line of para.lines ?? []) {

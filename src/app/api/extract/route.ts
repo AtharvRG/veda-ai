@@ -1,5 +1,7 @@
 // src/app/api/extract/route.ts
 import { NextResponse } from 'next/server';
+import { getLineBoxes } from '@/lib/lineBoxes';
+import { groupLinesIntoAnswers } from '@/lib/groupAnswers';
 
 /**
  * Four-stage pipeline:
@@ -17,14 +19,13 @@ type JsonRecord = Record<string, unknown>;
 
 type AnswerRegion = {
   id: string;
+  label: string; // e.g. "Answer 1" or "1." extracted from the region's first line
   text: string;
   page: number;
   bbox: OcrBox;
   pageWidth: number;
   pageHeight: number;
 };
-
-type PageDimensions = { width: number; height: number };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -38,14 +39,6 @@ function isValidDocumentFile(file: File | null | undefined) {
 
 function asRecord(value: unknown): JsonRecord {
   return value && typeof value === 'object' ? (value as JsonRecord) : {};
-}
-
-function asBox(value: unknown): OcrBox | null {
-  if (!Array.isArray(value) || value.length !== 4) return null;
-  const numbers = value.map(Number);
-  if (numbers.some((n) => !Number.isFinite(n))) return null;
-  const [xMin, yMin, xMax, yMax] = numbers;
-  return xMax > xMin && yMax > yMin ? [xMin, yMin, xMax, yMax] : null;
 }
 
 function percent(value: number) {
@@ -98,18 +91,6 @@ async function runOcr(file: File, apiKey: string) {
     throw new Error(`Mistral OCR failed (HTTP ${response.status}): ${detail}`);
   }
   return response.json();
-}
-
-// ---------------------------------------------------------------------------
-// Page dimension extraction (with fallbacks)
-// ---------------------------------------------------------------------------
-
-function getPageDimensions(page: unknown): PageDimensions {
-  const record = asRecord(page);
-  const dims = asRecord(record.dimensions);
-  const width = Number(dims.width ?? record.width ?? 0);
-  const height = Number(dims.height ?? record.height ?? 0);
-  return { width, height };
 }
 
 // ---------------------------------------------------------------------------
@@ -182,104 +163,58 @@ async function extractQuestions(markdown: string, apiKey: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Stage 2: Answer Extraction (group OCR blocks into answer regions)
+// Stage 2: Answer Extraction (line-level boxes + LLM content grouping)
 // ---------------------------------------------------------------------------
-
-type OcrBlock = { text: string; bbox: OcrBox; type: string };
-
-function getPageBlocks(page: unknown): OcrBlock[] {
-  const record = asRecord(page);
-  const blocks = Array.isArray(record.blocks) ? record.blocks : [];
-  const out: OcrBlock[] = [];
-  for (const raw of blocks) {
-    const b = asRecord(raw);
-    const text = String(b.content ?? b.text ?? '').trim();
-    // Mistral returns bbox as 4 separate fields: top_left_x/y, bottom_right_x/y
-    const xMin = Number(b.top_left_x);
-    const yMin = Number(b.top_left_y);
-    const xMax = Number(b.bottom_right_x);
-    const yMax = Number(b.bottom_right_y);
-    const bbox: OcrBox | null =
-      Number.isFinite(xMin) && Number.isFinite(yMin) && Number.isFinite(xMax) && Number.isFinite(yMax) && xMax > xMin && yMax > yMin
-        ? [xMin, yMin, xMax, yMax]
-        : asBox(b.bbox); // fallback for any block that uses the array form
-    if (text && bbox) out.push({ text, bbox, type: String(b.type ?? 'text') });
-  }
-  return out;
-}
+//
+// Old approach (removed): tried to split Mistral's paragraph-level blocks
+// with regex heuristics. Failed because students use bare numbering, sub-lists,
+// merged answers, etc. - no regex can robustly find answer boundaries.
+//
+// New approach: Tesseract gives us a box per LINE (the atomic unit that's
+// always correct). An LLM reads the line texts in order + the question list
+// and returns per-answer line ranges by CONTENT. We union the line boxes into
+// one box per answer. Mistral OCR still runs in parallel for high-quality
+// answer text, but the boxes come from Tesseract lines.
 
 /**
- * Group OCR blocks on a page into answer regions.
+ * Build answer regions from Tesseract line boxes + LLM grouping.
  *
- * Strategy:
- *  - A block of type "title" (e.g. "## Answer 1") starts a NEW region.
- *  - Otherwise, a vertical gap larger than `gapThreshold` pixels also starts a new region.
- * This handles handwritten sheets where answers are labelled, and falls back to
- * gap-based grouping when no titles are present.
+ * `lines` are the line-level boxes from Tesseract (in reading order).
+ * `groups` are the LLM's per-answer line ranges (1-indexed, inclusive).
+ * We union the line boxes for each group into one AnswerRegion. The region
+ * text is the joined Tesseract line texts - messy but sufficient for the
+ * grading LLM, which is robust to OCR noise.
  */
-function groupBlocksIntoRegions(blocks: OcrBlock[], page: number, dims: PageDimensions, gapThreshold: number): AnswerRegion[] {
-  if (!blocks.length || !dims.width || !dims.height) return [];
-
-  // Sort top-to-bottom, then left-to-right.
-  const sorted = [...blocks].sort((a, b) => {
-    const [, ayMin] = a.bbox;
-    const [, byMin] = b.bbox;
-    return ayMin - byMin || a.bbox[0] - b.bbox[0];
-  });
-
+function buildRegionsFromLineGroups(
+  lines: { page: number; text: string; bbox: OcrBox; pageWidth: number; pageHeight: number }[],
+  groups: { questionNumber: string; startLine: number; endLine: number }[],
+): AnswerRegion[] {
   const regions: AnswerRegion[] = [];
-  let currentBox: OcrBox | null = null;
-  let currentText: string[] = [];
-  let lastBottom = 0;
-
-  const flush = () => {
-    if (!currentBox || !currentText.length) return;
+  for (const group of groups) {
+    const slice = lines.slice(group.startLine - 1, group.endLine); // 1-indexed inclusive
+    if (!slice.length) continue;
+    // Union boxes. Lines may span pages; if so, keep them on the first page
+    // but the bbox is still valid for that page. (Multi-page answers are rare
+    // and the viewer highlights per page anyway.)
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    for (const l of slice) {
+      x0 = Math.min(x0, l.bbox[0]);
+      y0 = Math.min(y0, l.bbox[1]);
+      x1 = Math.max(x1, l.bbox[2]);
+      y1 = Math.max(y1, l.bbox[3]);
+    }
+    const first = slice[0];
+    const text = slice.map((l) => l.text).join(' ').replace(/\s+/g, ' ').trim();
     regions.push({
-      id: `r-${page}-${regions.length + 1}`,
-      text: currentText.join(' ').replace(/\s+/g, ' ').trim(),
-      page,
-      bbox: currentBox,
-      pageWidth: dims.width,
-      pageHeight: dims.height,
+      id: `r-${regions.length + 1}`,
+      label: group.questionNumber,
+      text,
+      page: first.page,
+      bbox: [x0, y0, x1, y1],
+      pageWidth: first.pageWidth,
+      pageHeight: first.pageHeight,
     });
-    currentBox = null;
-    currentText = [];
-  };
-
-  for (const block of sorted) {
-    const [, yMin, , yMax] = block.bbox;
-    // A title block (e.g. "## Answer 1") always starts a new region.
-    const isTitle = block.type === 'title' || /^#{1,6}\s/i.test(block.text);
-    if (currentBox && (isTitle || yMin - lastBottom > gapThreshold)) flush();
-
-    const [bxMin, byMin, bxMax, byMax] = block.bbox;
-    currentBox = currentBox
-      ? [Math.min(currentBox[0], bxMin), Math.min(currentBox[1], byMin), Math.max(currentBox[2], bxMax), Math.max(currentBox[3], byMax)]
-      : [bxMin, byMin, bxMax, byMax];
-    // Strip leading markdown headers from the region text for cleaner LLM matching.
-    currentText.push(block.text.replace(/^#{1,6}\s+/, ''));
-    lastBottom = yMax;
   }
-  flush();
-  return regions;
-}
-
-function extractAnswerRegions(ocr: unknown): AnswerRegion[] {
-  const root = asRecord(ocr);
-  const pages = Array.isArray(root.pages) ? root.pages : [];
-  const regions: AnswerRegion[] = [];
-
-  pages.forEach((rawPage, i) => {
-    const page = i + 1;
-    const dims = getPageDimensions(rawPage);
-    const blocks = getPageBlocks(rawPage);
-    // Gap threshold ~ 1.5x the median line height on the page, fallback to 30px.
-    const heights = blocks.map((b) => b.bbox[3] - b.bbox[1]).sort((a, b) => a - b);
-    const median = heights.length ? heights[Math.floor(heights.length / 2)] : 20;
-    const gap = Math.max(median * 1.5, 30);
-    regions.push(...groupBlocksIntoRegions(blocks, page, dims, gap));
-  });
-
   return regions;
 }
 
@@ -330,8 +265,11 @@ async function mapAndGrade(
           role: 'system',
           content:
             'You map student answer regions to exam questions and grade them. ' +
-            'Match by CONTENT - compare the question text to the OCR text of each answer region. ' +
-            'Answers may be out of order or span multiple regions. ' +
+            'Each answer region has a "label" field extracted from the sheet (e.g. "Ans 1", "Answer 7", "10."). ' +
+            'PRIMARY RULE: match a region to the question whose NUMBER equals the number in the region label. "Ans 1" matches question 1, "Ans 7" matches question 7, "10." matches question 10. ' +
+            'If a region has no label, fall back to matching by content similarity between the question text and the region text. ' +
+            'CRITICAL constraints: each region maps to AT MOST ONE question. Do NOT assign the same region to multiple questions. Do NOT return all regions on a page for one question. ' +
+            'Answers may span multiple consecutive regions (e.g. an answer continuing onto the next page) - in that case return all the continuation region IDs. ' +
             'Only return region IDs from the supplied list - never invent IDs or coordinates. ' +
             'For unanswered questions return an empty answer_region_ids array and 0 marks. ' +
             'Grade fairly out of maxMarks and give concise feedback.',
@@ -340,7 +278,7 @@ async function mapAndGrade(
           role: 'user',
           content: JSON.stringify({
             questions: questions.map(({ id, number, text, maxMarks }) => ({ id, number, text, maxMarks })),
-            answer_regions: regions.map(({ id, text, page }) => ({ id, text, page })),
+            answer_regions: regions.map(({ id, label, text, page }) => ({ id, label, text, page })),
           }),
         },
       ],
@@ -365,9 +303,54 @@ function buildQuestions(
   const graded = Array.isArray(grading.questions) ? grading.questions : [];
   const gradeMap = new Map(graded.map((g) => [String(asRecord(g).id), asRecord(g)]));
 
-  return questions.map((q) => {
+  // Raw region IDs per question from the LLM.
+  const rawIdsByQuestion = new Map<string, string[]>();
+  for (const q of questions) {
     const g = gradeMap.get(q.id) ?? {};
     const ids = Array.isArray(g.answer_region_ids) ? g.answer_region_ids.map(String) : [];
+    rawIdsByQuestion.set(q.id, ids);
+  }
+
+  // Enforce one-to-one: if a region is assigned to multiple questions, keep it only
+  // on the question whose number matches the number in the region's label.
+  const regionOwner = new Map<string, string>(); // regionId -> questionId
+  const labelNumber = (label: string) => {
+    const m = label.match(/(\d+(?:\s*[()a-z]+)?)/i);
+    return m ? m[1].replace(/\s+/g, '').toLowerCase() : '';
+  };
+
+  // First pass: assign regions that appear for exactly one question.
+  const regionQuestionCount = new Map<string, number>();
+  for (const ids of rawIdsByQuestion.values()) {
+    for (const id of ids) regionQuestionCount.set(id, (regionQuestionCount.get(id) ?? 0) + 1);
+  }
+  for (const q of questions) {
+    for (const id of rawIdsByQuestion.get(q.id) ?? []) {
+      if (regionQuestionCount.get(id) === 1) regionOwner.set(id, q.id);
+    }
+  }
+  // Second pass: for contested regions, give to the question whose number matches the label.
+  for (const q of questions) {
+    for (const id of rawIdsByQuestion.get(q.id) ?? []) {
+      if (regionOwner.has(id)) continue;
+      const region = regionMap.get(id);
+      if (region && labelNumber(region.label) === labelNumber(q.number)) {
+        regionOwner.set(id, q.id);
+      }
+    }
+  }
+  // Any still-unowned contested region: assign to the first question that claims it.
+  for (const q of questions) {
+    for (const id of rawIdsByQuestion.get(q.id) ?? []) {
+      if (!regionOwner.has(id)) regionOwner.set(id, q.id);
+    }
+  }
+
+  return questions.map((q) => {
+    const g = gradeMap.get(q.id) ?? {};
+    const rawIds = rawIdsByQuestion.get(q.id) ?? [];
+    // Keep only regions this question owns (one-to-one enforcement).
+    const ids = rawIds.filter((id) => regionOwner.get(id) === q.id);
     const boxes = ids
       .map((id) => regionMap.get(id))
       .filter((r): r is AnswerRegion => Boolean(r))
@@ -408,10 +391,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'MISTRAL_API_KEY is not configured.' }, { status: 500 });
     }
 
-    // Stage 1 + 2 in parallel: OCR both documents.
-    const [questionOcr, answerOcr] = await Promise.all([
+    // Stage 1 + 2 in parallel: OCR the question paper (Mistral, for clean text)
+    // and extract line-level boxes from the answer sheet (Tesseract). The
+    // answer sheet's text also comes from Tesseract lines - messy but good
+    // enough for the grading LLM, and it keeps boxes + text perfectly aligned.
+    const [questionOcr, answerLines] = await Promise.all([
       runOcr(questionFile, apiKey),
-      runOcr(answerFile, apiKey),
+      getLineBoxes(answerFile),
     ]);
 
     // Stage 1: extract ordered questions from the question paper markdown.
@@ -420,13 +406,23 @@ export async function POST(request: Request) {
     const questions = await extractQuestions(questionMarkdown, apiKey);
     if (!questions.length) throw new Error('Could not extract any questions from the question paper.');
 
-    // Stage 2: group answer-sheet OCR blocks into regions with real bboxes.
-    const answerRegions = extractAnswerRegions(answerOcr);
+    // Stage 2: group Tesseract lines into per-answer regions via an LLM call.
+    // The LLM reads line texts + the question list and returns line ranges.
+    console.log('[DEBUG] tesseract line count:', answerLines.length);
+    console.log('[DEBUG] first 10 lines:', answerLines.slice(0, 10).map((l, i) => `${i + 1}. ${l.text}`));
+    const lineGroups = await groupLinesIntoAnswers(answerLines, questions, apiKey);
+    console.log('[DEBUG] line groups:', lineGroups);
+    const answerRegions = buildRegionsFromLineGroups(answerLines, lineGroups);
+    console.log('[DEBUG] answer regions:', answerRegions.map((r) => ({ id: r.id, label: r.label, page: r.page, text: r.text.slice(0, 60) })));
 
     // Stage 3 + 4: map regions to questions by content and grade.
     const grading = answerRegions.length
       ? await mapAndGrade(questions, answerRegions, apiKey)
       : {};
+    console.log('[DEBUG] grading mapping:', (Array.isArray(grading.questions) ? grading.questions : []).map((q) => {
+      const r = asRecord(q);
+      return { id: r.id, regionIds: r.answer_region_ids, marks: r.marksAwarded };
+    }));
 
     const finalQuestions = buildQuestions(questions, answerRegions, grading);
 
