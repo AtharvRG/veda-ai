@@ -212,14 +212,18 @@ function extractOcrBlocks(ocr: unknown): (OcrBlock & { id: string })[] {
 
       if (type === 'list') {
         // Split the list block into per-line sub-blocks. Each line gets a
-        // proportional vertical slice of the parent bbox.
+        // vertical slice of the parent bbox weighted by its text length, so
+        // longer answers get proportionally more height than short ones.
         const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
         const [x0, y0, x1, y1] = bbox;
         const totalHeight = y1 - y0;
-        const lineCount = lines.length;
-        for (let i = 0; i < lineCount; i++) {
-          const lineY0 = y0 + Math.round((totalHeight * i) / lineCount);
-          const lineY1 = y0 + Math.round((totalHeight * (i + 1)) / lineCount);
+        const weights = lines.map((l) => Math.max(1, l.length));
+        const totalWeight = weights.reduce((a, b) => a + b, 0);
+        let acc = 0;
+        for (let i = 0; i < lines.length; i++) {
+          const lineY0 = y0 + Math.round((totalHeight * acc) / totalWeight);
+          acc += weights[i];
+          const lineY1 = y0 + Math.round((totalHeight * acc) / totalWeight);
           push(pageNum, lines[i], [x0, lineY0, x1, lineY1], pageWidth, pageHeight);
         }
       } else {
@@ -247,26 +251,34 @@ function buildRegionsFromBlockGroups(
   for (const group of groups) {
     const picked = group.blockIds.map((id) => byId.get(id)).filter((b): b is OcrBlock & { id: string } => !!b);
     if (!picked.length) continue;
-    // Union boxes. Blocks may span pages; keep the region on the first block's
-    // page. (The viewer highlights per page; multi-page answers are rare.)
-    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    // Group blocks by page. An answer spanning multiple pages gets one region
+    // per page (the grading LLM already supports multiple region ids per
+    // question). This keeps each page's box tight to that page's blocks.
+    const byPage = new Map<number, (OcrBlock & { id: string })[]>();
     for (const b of picked) {
-      x0 = Math.min(x0, b.bbox[0]);
-      y0 = Math.min(y0, b.bbox[1]);
-      x1 = Math.max(x1, b.bbox[2]);
-      y1 = Math.max(y1, b.bbox[3]);
+      const arr = byPage.get(b.page) ?? [];
+      arr.push(b);
+      byPage.set(b.page, arr);
     }
-    const first = picked[0];
-    const text = picked.map((b) => b.text).join('\n').trim();
-    regions.push({
-      id: `r-${regions.length + 1}`,
-      label: group.questionNumber,
-      text,
-      page: first.page,
-      bbox: [x0, y0, x1, y1],
-      pageWidth: first.pageWidth,
-      pageHeight: first.pageHeight,
-    });
+    for (const [page, pageBlocks] of byPage) {
+      let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (const b of pageBlocks) {
+        x0 = Math.min(x0, b.bbox[0]);
+        y0 = Math.min(y0, b.bbox[1]);
+        x1 = Math.max(x1, b.bbox[2]);
+        y1 = Math.max(y1, b.bbox[3]);
+      }
+      const text = pageBlocks.map((b) => b.text).join('\n').trim();
+      regions.push({
+        id: `r-${regions.length + 1}`,
+        label: group.questionNumber,
+        text,
+        page,
+        bbox: [x0, y0, x1, y1],
+        pageWidth: pageBlocks[0].pageWidth,
+        pageHeight: pageBlocks[0].pageHeight,
+      });
+    }
   }
   return regions;
 }
