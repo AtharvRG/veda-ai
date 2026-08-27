@@ -1,7 +1,6 @@
 // src/app/api/extract/route.ts
 import { NextResponse } from 'next/server';
-import { getLineBoxes } from '@/lib/lineBoxes';
-import { groupLinesIntoAnswers } from '@/lib/groupAnswers';
+import { groupBlocksIntoAnswers, type OcrBlock, type BlockGroup } from '@/lib/groupAnswers';
 
 /**
  * Four-stage pipeline:
@@ -163,48 +162,102 @@ async function extractQuestions(markdown: string, apiKey: string) {
 }
 
 // ---------------------------------------------------------------------------
-// Stage 2: Answer Extraction (line-level boxes + LLM content grouping)
+// Stage 2: Answer Extraction (Mistral OCR blocks + LLM content grouping)
 // ---------------------------------------------------------------------------
 //
-// Old approach (removed): tried to split Mistral's paragraph-level blocks
-// with regex heuristics. Failed because students use bare numbering, sub-lists,
-// merged answers, etc. - no regex can robustly find answer boundaries.
-//
-// New approach: Tesseract gives us a box per LINE (the atomic unit that's
-// always correct). An LLM reads the line texts in order + the question list
-// and returns per-answer line ranges by CONTENT. We union the line boxes into
-// one box per answer. Mistral OCR still runs in parallel for high-quality
-// answer text, but the boxes come from Tesseract lines.
+// Mistral OCR returns pages[].blocks, each with clean readable text AND a
+// real bounding box (top_left_x/y, bottom_right_x/y) plus page dimensions.
+// One answer can span multiple blocks (e.g. answer 9 continues across pages).
+// An LLM reads the block texts in order + the question list and returns which
+// blocks form each answer. We union the block bboxes into one box per answer.
 
 /**
- * Build answer regions from Tesseract line boxes + LLM grouping.
+ * Extract flat, ordered OCR blocks from Mistral's pages[].blocks output.
+ * Each block gets a stable id (b-1, b-2, ...) in reading order across pages.
  *
- * `lines` are the line-level boxes from Tesseract (in reading order).
- * `groups` are the LLM's per-answer line ranges (1-indexed, inclusive).
- * We union the line boxes for each group into one AnswerRegion. The region
- * text is the joined Tesseract line texts - messy but sufficient for the
- * grading LLM, which is robust to OCR noise.
+ * List blocks (type "list") contain multiple numbered answers in one block
+ * with a single bbox. We split them into per-line sub-blocks, giving each
+ * line a proportional vertical slice of the parent block's bbox. This is an
+ * approximation but works well for handwriting with roughly even line spacing.
  */
-function buildRegionsFromLineGroups(
-  lines: { page: number; text: string; bbox: OcrBox; pageWidth: number; pageHeight: number }[],
-  groups: { questionNumber: string; startLine: number; endLine: number }[],
+function extractOcrBlocks(ocr: unknown): (OcrBlock & { id: string })[] {
+  const root = asRecord(ocr);
+  const pages = Array.isArray(root.pages) ? root.pages : [];
+  const out: (OcrBlock & { id: string })[] = [];
+  let idx = 0;
+  const push = (page: number, text: string, bbox: OcrBox, pageWidth: number, pageHeight: number) => {
+    if (!text.trim() || !pageWidth || !pageHeight) return;
+    idx++;
+    out.push({ id: `b-${idx}`, page, text: text.trim(), bbox, pageWidth, pageHeight });
+  };
+  for (const page of pages) {
+    const p = asRecord(page);
+    const dims = asRecord(p.dimensions);
+    const pageWidth = Number(dims.width ?? 0);
+    const pageHeight = Number(dims.height ?? 0);
+    // Mistral's `index` is 0-based; fall back to 1-based position.
+    const pageNum = Number(p.index ?? 0) + 1;
+    const blocks = Array.isArray(p.blocks) ? p.blocks : [];
+    for (const blk of blocks) {
+      const b = asRecord(blk);
+      const bbox: OcrBox = [
+        Number(b.top_left_x ?? 0),
+        Number(b.top_left_y ?? 0),
+        Number(b.bottom_right_x ?? 0),
+        Number(b.bottom_right_y ?? 0),
+      ];
+      const text = String(b.content ?? '');
+      const type = String(b.type ?? 'text');
+      if (!text.trim()) continue;
+
+      if (type === 'list') {
+        // Split the list block into per-line sub-blocks. Each line gets a
+        // proportional vertical slice of the parent bbox.
+        const lines = text.split('\n').map((l) => l.trim()).filter(Boolean);
+        const [x0, y0, x1, y1] = bbox;
+        const totalHeight = y1 - y0;
+        const lineCount = lines.length;
+        for (let i = 0; i < lineCount; i++) {
+          const lineY0 = y0 + Math.round((totalHeight * i) / lineCount);
+          const lineY1 = y0 + Math.round((totalHeight * (i + 1)) / lineCount);
+          push(pageNum, lines[i], [x0, lineY0, x1, lineY1], pageWidth, pageHeight);
+        }
+      } else {
+        push(pageNum, text, bbox, pageWidth, pageHeight);
+      }
+    }
+  }
+  return out;
+}
+
+/**
+ * Build answer regions from OCR blocks + LLM grouping.
+ *
+ * `blocks` are the Mistral OCR blocks (with clean text + real bboxes).
+ * `groups` are the LLM's per-answer block-id lists.
+ * We union the block bboxes for each group into one AnswerRegion. The region
+ * text is the joined block texts - clean and readable for the grading LLM.
+ */
+function buildRegionsFromBlockGroups(
+  blocks: (OcrBlock & { id: string })[],
+  groups: BlockGroup[],
 ): AnswerRegion[] {
+  const byId = new Map(blocks.map((b) => [b.id, b]));
   const regions: AnswerRegion[] = [];
   for (const group of groups) {
-    const slice = lines.slice(group.startLine - 1, group.endLine); // 1-indexed inclusive
-    if (!slice.length) continue;
-    // Union boxes. Lines may span pages; if so, keep them on the first page
-    // but the bbox is still valid for that page. (Multi-page answers are rare
-    // and the viewer highlights per page anyway.)
+    const picked = group.blockIds.map((id) => byId.get(id)).filter((b): b is OcrBlock & { id: string } => !!b);
+    if (!picked.length) continue;
+    // Union boxes. Blocks may span pages; keep the region on the first block's
+    // page. (The viewer highlights per page; multi-page answers are rare.)
     let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
-    for (const l of slice) {
-      x0 = Math.min(x0, l.bbox[0]);
-      y0 = Math.min(y0, l.bbox[1]);
-      x1 = Math.max(x1, l.bbox[2]);
-      y1 = Math.max(y1, l.bbox[3]);
+    for (const b of picked) {
+      x0 = Math.min(x0, b.bbox[0]);
+      y0 = Math.min(y0, b.bbox[1]);
+      x1 = Math.max(x1, b.bbox[2]);
+      y1 = Math.max(y1, b.bbox[3]);
     }
-    const first = slice[0];
-    const text = slice.map((l) => l.text).join(' ').replace(/\s+/g, ' ').trim();
+    const first = picked[0];
+    const text = picked.map((b) => b.text).join('\n').trim();
     regions.push({
       id: `r-${regions.length + 1}`,
       label: group.questionNumber,
@@ -391,13 +444,13 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'MISTRAL_API_KEY is not configured.' }, { status: 500 });
     }
 
-    // Stage 1 + 2 in parallel: OCR the question paper (Mistral, for clean text)
-    // and extract line-level boxes from the answer sheet (Tesseract). The
-    // answer sheet's text also comes from Tesseract lines - messy but good
-    // enough for the grading LLM, and it keeps boxes + text perfectly aligned.
-    const [questionOcr, answerLines] = await Promise.all([
+    // Stage 1 + 2 in parallel: OCR both documents with Mistral. The question
+    // paper gives us the question list (from markdown). The answer sheet gives
+    // us clean readable text AND a bounding box per block - we group blocks
+    // into answers and union their boxes.
+    const [questionOcr, answerOcr] = await Promise.all([
       runOcr(questionFile, apiKey),
-      getLineBoxes(answerFile),
+      runOcr(answerFile, apiKey),
     ]);
 
     // Stage 1: extract ordered questions from the question paper markdown.
@@ -406,14 +459,15 @@ export async function POST(request: Request) {
     const questions = await extractQuestions(questionMarkdown, apiKey);
     if (!questions.length) throw new Error('Could not extract any questions from the question paper.');
 
-    // Stage 2: group Tesseract lines into per-answer regions via an LLM call.
-    // The LLM reads line texts + the question list and returns line ranges.
-    console.log('[DEBUG] tesseract line count:', answerLines.length);
-    console.log('[DEBUG] first 10 lines:', answerLines.slice(0, 10).map((l, i) => `${i + 1}. ${l.text}`));
-    const lineGroups = await groupLinesIntoAnswers(answerLines, questions, apiKey);
-    console.log('[DEBUG] line groups:', lineGroups);
-    const answerRegions = buildRegionsFromLineGroups(answerLines, lineGroups);
-    console.log('[DEBUG] answer regions:', answerRegions.map((r) => ({ id: r.id, label: r.label, page: r.page, text: r.text.slice(0, 60) })));
+    // Stage 2: group Mistral OCR blocks into per-answer regions via an LLM call.
+    // The LLM reads clean block texts + the question list and returns block ids.
+    const answerBlocks = extractOcrBlocks(answerOcr);
+    console.log('[DEBUG] ocr block count:', answerBlocks.length);
+    console.log('[DEBUG] blocks:', JSON.stringify(answerBlocks.map((b) => ({ id: b.id, page: b.page, text: b.text.slice(0, 80) }))));
+    const blockGroups = await groupBlocksIntoAnswers(answerBlocks, questions, apiKey);
+    console.log('[DEBUG] block groups:', JSON.stringify(blockGroups));
+    const answerRegions = buildRegionsFromBlockGroups(answerBlocks, blockGroups);
+    console.log('[DEBUG] answer regions:', JSON.stringify(answerRegions.map((r) => ({ id: r.id, label: r.label, page: r.page, bbox: r.bbox, text: r.text.slice(0, 60) }))));
 
     // Stage 3 + 4: map regions to questions by content and grade.
     const grading = answerRegions.length
