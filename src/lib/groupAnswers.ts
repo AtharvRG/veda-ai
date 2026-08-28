@@ -73,7 +73,10 @@ export async function groupBlocksIntoAnswers(
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: 'mistral-large-latest',
+      // Fast model for grouping (not reasoning). mistral-small-latest reads
+      // block texts and assigns them to questions — no deep judgment needed.
+      model: 'mistral-small-latest',
+      temperature: 0,
       response_format: {
         type: 'json_schema',
         json_schema: { name: 'block_groups', schema: groupingSchema, strict: true },
@@ -88,7 +91,7 @@ export async function groupBlocksIntoAnswers(
             'Rules: ' +
             '1. Use the question NUMBER (e.g. "1", "11(a)") as questionNumber. ' +
             '2. A block starting with "N." or "N)" usually begins the answer for question N - but sub-list items (1., 2. inside an answer) are part of the current answer, not new answers. ' +
-            '3. If an answer continues across pages, include all its blocks in one group. ' +
+            '3. CRITICAL: If an answer continues across pages, include ALL its blocks (from every page) in ONE group. Do NOT split a single answer into multiple groups. ' +
             '4. Skip blocks that are not part of any answer (name, roll number, headers) - simply do not include them in any group. ' +
             '5. Match each answer to the question it addresses by reading the answer content against the question list. ' +
             '6. Only return groups for questions that were actually answered. ' +

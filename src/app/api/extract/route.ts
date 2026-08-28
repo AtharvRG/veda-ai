@@ -55,6 +55,44 @@ function toPercentageBox(region: AnswerRegion) {
   };
 }
 
+/**
+ * Combine regions that share the same label (i.e. one answer split across
+ * multiple pages) into a single region with concatenated text.
+ *
+ * Why: buildRegionsFromBlockGroups produces one region per page for multi-page
+ * answers (to keep each page's bbox tight). Sending those as separate entries
+ * to the grading LLM is unreliable — it may map only one page and grade on
+ * partial text. Pre-combining here means the LLM always sees the full answer
+ * text as one cohesive block, so grading is consistent.
+ *
+ * Bbox/page are taken from the FIRST region (the viewer still gets per-page
+ * boxes via buildQuestions, which reads all regions owned by a question).
+ */
+function combineRegionsByLabel(regions: AnswerRegion[]): AnswerRegion[] {
+  const byLabel = new Map<string, AnswerRegion[]>();
+  for (const r of regions) {
+    const key = r.label.trim().toLowerCase();
+    const arr = byLabel.get(key) ?? [];
+    arr.push(r);
+    byLabel.set(key, arr);
+  }
+  const out: AnswerRegion[] = [];
+  for (const group of byLabel.values()) {
+    if (group.length === 1) {
+      out.push(group[0]);
+      continue;
+    }
+    // Sort by page so the combined text reads in order.
+    group.sort((a, b) => a.page - b.page);
+    const first = group[0];
+    out.push({
+      ...first,
+      text: group.map((r) => r.text).join('\n').trim(),
+    });
+  }
+  return out;
+}
+
 function parseJson(value: unknown): JsonRecord {
   try {
     const parsed = JSON.parse(String(value ?? '{}'));
@@ -129,7 +167,10 @@ async function extractQuestions(markdown: string, apiKey: string) {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: 'mistral-large-latest',
+      // Fast model for extraction (not reasoning). mistral-small-latest
+      // handles structured extraction well and is ~10x faster than large.
+      model: 'mistral-small-latest',
+      temperature: 0,
       response_format: {
         type: 'json_schema',
         json_schema: { name: 'question_list', schema: questionSchema, strict: true },
@@ -320,7 +361,11 @@ async function mapAndGrade(
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
     body: JSON.stringify({
-      model: 'mistral-large-latest',
+      // Pinned (not -latest) so a future alias swap can't silently enable
+      // reasoning/thinking tokens. mistral-large has no reasoning_effort
+      // support, so it never emits ThinkChunk — content is always a string.
+      model: 'mistral-large-2512',
+      temperature: 0,
       response_format: {
         type: 'json_schema',
         json_schema: { name: 'grading_result', schema: gradingSchema, strict: true },
@@ -412,15 +457,38 @@ function buildQuestions(
     }
   }
 
+  // Index regions by label (lowercased) so we can expand a combined region
+  // ID to all its per-page siblings for viewer highlighting.
+  const regionsByLabel = new Map<string, AnswerRegion[]>();
+  for (const r of regions) {
+    const key = r.label.trim().toLowerCase();
+    const arr = regionsByLabel.get(key) ?? [];
+    arr.push(r);
+    regionsByLabel.set(key, arr);
+  }
+
   return questions.map((q) => {
     const g = gradeMap.get(q.id) ?? {};
     const rawIds = rawIdsByQuestion.get(q.id) ?? [];
     // Keep only regions this question owns (one-to-one enforcement).
     const ids = rawIds.filter((id) => regionOwner.get(id) === q.id);
-    const boxes = ids
-      .map((id) => regionMap.get(id))
-      .filter((r): r is AnswerRegion => Boolean(r))
-      .map(toPercentageBox);
+    // Expand each owned region to all same-label siblings (multi-page answers).
+    // combineRegionsByLabel merged their text for grading but kept only the
+    // first region's ID — here we recover all per-page boxes for the viewer.
+    const expandedRegions: AnswerRegion[] = [];
+    const seen = new Set<string>();
+    for (const id of ids) {
+      const region = regionMap.get(id);
+      if (!region) continue;
+      const siblings = regionsByLabel.get(region.label.trim().toLowerCase()) ?? [region];
+      for (const sib of siblings) {
+        if (!seen.has(sib.id)) {
+          seen.add(sib.id);
+          expandedRegions.push(sib);
+        }
+      }
+    }
+    const boxes = expandedRegions.map(toPercentageBox);
 
     return {
       id: q.id,
@@ -482,9 +550,14 @@ export async function POST(request: Request) {
     const answerRegions = buildRegionsFromBlockGroups(answerBlocks, blockGroups);
     console.log('[DEBUG] answer regions:', JSON.stringify(answerRegions.map((r) => ({ id: r.id, label: r.label, page: r.page, bbox: r.bbox, text: r.text.slice(0, 60) }))));
 
+    // Combine multi-page regions of the same answer into one region so the
+    // grading LLM sees the full answer text as a single cohesive block.
+    const combinedRegions = combineRegionsByLabel(answerRegions);
+    console.log('[DEBUG] combined regions:', combinedRegions.length, '(from', answerRegions.length, 'raw)');
+
     // Stage 3 + 4: map regions to questions by content and grade.
-    const grading = answerRegions.length
-      ? await mapAndGrade(questions, answerRegions, apiKey)
+    const grading = combinedRegions.length
+      ? await mapAndGrade(questions, combinedRegions, apiKey)
       : {};
     console.log('[DEBUG] grading mapping:', (Array.isArray(grading.questions) ? grading.questions : []).map((q) => {
       const r = asRecord(q);

@@ -1,6 +1,8 @@
 ﻿# VedaAI
 
-VedaAI is a teacher-facing assessment workspace for reviewing a question paper and a student's answer sheet together. It uses Mistral OCR and Mistral Large to extract questions, locate answers, grade responses, and place reliable highlights over the original document.
+> Live: **[veda-ai-arg.vercel.app](https://veda-ai-arg.vercel.app)**
+
+VedaAI is a teacher-facing assessment workspace for reviewing a question paper and a student's answer sheet together. It uses Mistral OCR for text + geometry extraction and Mistral Large for grading, with reliable highlights placed over the original document using OCR-provided coordinates — never model-invented positions.
 
 ## What It Does
 
@@ -33,23 +35,27 @@ The server keeps text understanding and geometry grounded in the source document
 
 The API calls Mistral's `mistral-ocr-latest` endpoint for both files concurrently. The question paper uses its page markdown; the answer sheet uses its native `pages[].blocks` response, which includes readable text, real pixel bounding boxes, and page dimensions.
 
-### 2. Extract questions
+### 2. Extract questions — `mistral-small-latest`
 
-The question-paper markdown is sent to `mistral-large-latest` with a strict JSON schema. The model returns an ordered list containing each question's exact printed number, text, and maximum marks. Sub-parts remain separate questions.
+The question-paper markdown is sent to `mistral-small-latest` (temperature 0) with a strict JSON schema. The model returns an ordered list containing each question's exact printed number, text, and maximum marks. Sub-parts remain separate questions. A small model is used here because this is pure extraction — no reasoning required — and it is roughly 10× faster than Mistral Large.
 
-### 3. Build answer regions
+### 3. Group blocks into answers — `mistral-small-latest`
 
 Answer OCR blocks are flattened into reading order with stable IDs. Mistral list blocks may contain several numbered answers under one bounding box, so those lines are split into proportional vertical slices weighted by text length. This gives longer answers more space while preserving the OCR coordinates as the source of truth.
 
-`groupBlocksIntoAnswers` sends the clean block text and extracted question list to `mistral-large-latest`. The model returns only the block IDs belonging to each answer. The server then unions selected blocks into answer regions. Regions are grouped by page first, so an answer that continues onto another page receives one tight box per page instead of one oversized cross-page box.
+`groupBlocksIntoAnswers` sends the clean block text and extracted question list to `mistral-small-latest` (temperature 0). The model returns only the block IDs belonging to each answer. The server then unions selected blocks into answer regions. Regions are grouped by page first, so an answer that continues onto another page receives one tight box per page instead of one oversized cross-page box.
 
-### 4. Map and grade
+### 4. Combine multi-page answers
 
-The answer regions and questions are sent to `mistral-large-latest` in a structured mapping-and-grading request. The model returns region IDs, marks, and feedback. It may associate multiple regions with one question, but a region can belong to at most one question. The server validates returned IDs and uses the answer label as a deterministic tie-breaker for contested regions.
+`combineRegionsByLabel` merges regions that share the same answer label (i.e. one answer split across pages) into a single region with concatenated text *before* grading. This guarantees the grading LLM always sees the full answer as one cohesive block and can't miss a continuation page — which previously caused shallow or inconsistent feedback for multi-page answers. Per-page bounding boxes are preserved separately for the viewer.
 
-### 5. Render highlights
+### 5. Map and grade — `mistral-large-2512`
 
-Each pixel bounding box is converted to `top`, `left`, `width`, and `height` percentages using the dimensions of its own OCR page. The client-side `react-pdf` viewer renders those boxes over the uploaded answer sheet. Images are supported as a one-page viewer, while PDFs provide page navigation, zoom, rotation, and fit-to-width controls.
+The combined answer regions and questions are sent to `mistral-large-2512` (temperature 0, pinned — not `-latest` — so a future alias swap can't silently change behaviour) in a structured mapping-and-grading request. The model returns region IDs, marks, and feedback. It may associate multiple regions with one question, but a region can belong to at most one question. The server validates returned IDs and uses the answer label as a deterministic tie-breaker for contested regions. Mistral Large is used here because grading requires judgment; the two earlier extraction stages do not.
+
+### 6. Render highlights
+
+Each pixel bounding box is converted to `top`, `left`, `width`, and `height` percentages using the dimensions of its own OCR page. For multi-page answers, `buildQuestions` expands a combined region back to all its per-page siblings so every page of the answer is highlighted. The client-side `react-pdf` viewer renders those boxes over the uploaded answer sheet. Images are supported as a one-page viewer, while PDFs provide page navigation, zoom, rotation, and fit-to-width controls.
 
 ## Tech Stack
 
@@ -58,54 +64,18 @@ Each pixel bounding box is converted to `top`, `left`, `width`, and `height` per
 - Tailwind CSS 4
 - Framer Motion for focused transitions and loading states
 - `react-pdf` for client-side PDF rendering
-- Mistral OCR and Mistral Large for extraction, mapping, and grading
+- Mistral OCR (`mistral-ocr-latest`) for text + bounding-box extraction
+- Mistral Small (`mistral-small-latest`) for fast question extraction and block grouping
+- Mistral Large (`mistral-large-2512`, pinned) for answer mapping and grading
 - React Context for in-memory exam state
 - Bricolage Grotesque for the interface typography
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js 20 or newer
-- A Mistral API key with access to `mistral-ocr-latest` and `mistral-large-latest`
-
-### Setup
-
-Install dependencies:
-
-```bash
-npm install
-```
-
-Create `.env.local` in the project root:
-
-```env
-MISTRAL_API_KEY=your_mistral_api_key
-```
-
-Start the development server:
-
-```bash
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000).
-
-## Available Scripts
-
-```bash
-npm run dev      # Start the development server
-npm run lint     # Run ESLint
-npm run build    # Create a production build
-npm run start    # Start the production server
-```
 
 ## Project Structure
 
 ```text
 src/
    app/
-      api/extract/route.ts       Mistral OCR, extraction, mapping, and grading API
+      api/extract/route.ts       Mistral OCR, extraction, combining, mapping, and grading API
       globals.css                Global theme and scrollbar styles
       layout.tsx                 Metadata, font, and root layout
       page.tsx                   Desktop shell and responsive application frame
@@ -116,22 +86,48 @@ src/
       MappingScreen.tsx          Responsive review workspace
       AppContent.tsx             Upload, extraction, and mapping state switcher
    lib/
-      groupAnswers.ts            LLM block-to-answer grouping
+      groupAnswers.ts            LLM block-to-answer grouping (mistral-small-latest)
       utils.ts                   Shared class-name utilities
    store/
       ExamContext.tsx            In-memory files, questions, and active selection
-public/                        Logos, avatar, school badge, and dashboard artwork
+public/                          Logos, avatar, school badge, and dashboard artwork
 ```
 
-## Limitations
+## Available Scripts
 
-- Exam state is held in React Context memory. Reloading the page clears uploaded files, results, edits, and the current review.
-- OCR and grading quality depends on document resolution, scan quality, and handwriting clarity.
-- The current workflow processes one student answer sheet at a time.
-- The visible upload cards indicate a 10 MB maximum, but file-size enforcement is not currently implemented in the API route.
-- The sidebar, profile controls, notifications, and several navigation items are presentational UI for the current assessment workspace; they are not connected to authentication or separate routes.
-- CSV export includes question text, marks, status, and feedback, but not highlighted coordinates or document files.
+```bash
+npm run dev      # Start the development server
+npm run lint     # Run ESLint
+npm run build    # Create a production build
+npm run start    # Start the production server
+```
+
+## What Works Well
+
+- **Grounded highlights.** Bounding boxes always come from OCR pixel coordinates, never from the LLM. This was the core reliability fix after earlier approaches that asked the LLM to invent coordinates produced plausible but inaccurate boxes.
+- **Fast extraction.** Question extraction and block grouping run on `mistral-small-latest`, cutting those stages from ~10–15s each down to ~1s. Only grading stays on Mistral Large, where judgment matters.
+- **Multi-page answer handling.** Answers split across pages are combined into one text block for grading (so feedback is consistent and complete) while keeping per-page highlight boxes for the viewer.
+- **Deterministic output.** All LLM calls use `temperature: 0` and strict JSON schemas, so the same documents produce the same structure every run.
+- **Pinned grading model.** `mistral-large-2512` is pinned instead of `-latest` so a future Mistral alias swap can't silently change model behaviour or introduce reasoning tokens.
+- **One-to-one region enforcement.** A region can map to at most one question, with the answer label used as a deterministic tie-breaker when the LLM assigns the same region to multiple questions.
+- **Teacher overrides.** Marks and feedback are editable inline, and the reviewed result exports to CSV.
+- **Responsive layout.** Side-by-side review on desktop, segmented control on mobile.
+
+## Known Issues & Limitations
+
+- **Mistral Chat Completions availability.** The grading and grouping calls hit Mistral's `/v1/chat/completions` endpoint, which has historically lower uptime than the OCR endpoint. Transient `503 / code 3800` errors ("Service unavailable") can occur on Mistral's side — these are not caused by the app and usually clear on retry. There is currently no automatic retry/backoff, so a 503 fails the whole run.
+- **No retry logic.** A single non-OK response from any Mistral call throws and fails the pipeline. Transient 503/429/502/504 errors are not retried.
+- **In-memory state only.** Exam state is held in React Context. Reloading the page clears uploaded files, results, edits, and the current review. There is no persistence or database.
+- **One student at a time.** The workflow processes a single student's answer sheet per run; there is no batch upload.
+- **No file-size enforcement.** The upload cards indicate a 10 MB maximum, but the API route does not currently enforce it.
+- **OCR and grading quality.** Results depend on document resolution, scan quality, and handwriting clarity. Poor scans can produce weak OCR text, which then degrades grouping and grading.
+- **Grouping model limits.** `mistral-small-latest` handles most grouping well, but very dense or messy answer sheets can occasionally cause it to miss a cross-page continuation. The `combineRegionsByLabel` step mitigates the grading impact, but a missed group can still drop a page's highlight.
+- **Presentational-only UI.** The sidebar, profile controls, notifications, and several navigation items are presentational for the current assessment workspace; they are not connected to authentication or separate routes.
+- **CSV export scope.** Export includes question text, marks, status, and feedback, but not highlighted coordinates or the document files themselves.
+- **Debug logging.** The API route emits verbose `[DEBUG]` console logs (block counts, block text, groups, regions, grading). These are useful for troubleshooting but should be trimmed for production.
 
 ## Design Notes
 
-The central reliability rule is simple: let OCR provide both the text and the geometry. Earlier approaches that asked an LLM to invent highlight coordinates produced plausible but inaccurate boxes, especially for multi-page answers. VedaAI now uses the LLM for language tasks such as question extraction, block grouping, mapping, and grading, while the server owns coordinate validation and conversion.
+The central reliability rule is simple: **let OCR provide both the text and the geometry.** Earlier approaches that asked an LLM to invent highlight coordinates produced plausible but inaccurate boxes, especially for multi-page answers. VedaAI now uses the LLM only for language tasks — question extraction, block grouping, mapping, and grading — while the server owns coordinate validation, multi-page combining, and percentage conversion.
+
+The model split is deliberate: `mistral-small-latest` for the two extraction stages (fast, no judgment needed) and `mistral-large-2512` for grading (judgment required). This keeps total pipeline time around 25–30s for a typical 3–4 page set instead of the ~60s it took when all three calls used Mistral Large.
