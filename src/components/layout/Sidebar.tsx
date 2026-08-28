@@ -1,7 +1,7 @@
 // src/components/layout/Sidebar.tsx
 import React from 'react';
 import { 
-  LogoIcon, LayoutPanelIcon, SparklesIcon, GridIcon, 
+   LayoutPanelIcon, SparklesIcon, GridIcon, 
   UsersIcon, FileTextIcon, ClipboardIcon, ClockIcon, SettingsIcon 
 } from '../icons';
 import { cn } from '@/lib/utils';
@@ -20,7 +20,8 @@ export function Sidebar() {
       {/* Header */}
       <div className="flex items-center justify-between mb-8 px-2">
         <div className="flex items-center gap-2">
-          <LogoIcon className="w-8 h-8" />
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/veda.png" alt="VedaAI Logo" className="w-8 h-8 object-contain rounded-md" />
           <span className="font-bold text-xl tracking-tight">VedaAI</span>
         </div>
         <button className="text-gray-400 hover:text-gray-700 transition-colors">

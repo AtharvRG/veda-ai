@@ -32,7 +32,7 @@ export default function Home() {
               <div className="flex items-center gap-2 ml-2 pl-4 border-l border-gray-200 cursor-pointer">
 <div className="w-7 h-7 bg-gray-200 rounded-full overflow-hidden">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Madhur" alt="Avatar" />
+          <img src="/avatar.png" alt="Avatar" className="w-full h-full object-cover" />
                 </div>
                 <span className="text-sm font-medium">Madhur Rastogi</span>
                 <span className="text-xs text-gray-400">▼</span>

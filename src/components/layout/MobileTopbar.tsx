@@ -21,7 +21,7 @@ export function MobileTopbar() {
 {/* Placeholder Avatar */}
         <div className="w-8 h-8 bg-gray-200 rounded-full overflow-hidden shrink-0">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=Madhur" alt="Avatar" className="w-full h-full object-cover" />
+          <img src="/avatar.png" alt="Avatar" className="w-full h-full object-cover" />
         </div>
         
         <button className="text-gray-700 p-1">

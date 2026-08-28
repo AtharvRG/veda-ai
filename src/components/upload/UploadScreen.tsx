@@ -20,14 +20,10 @@ export function UploadScreen() {
         {isRetainedMode ? 'Question paper is already loaded. Just drop the next student\'s sheet.' : 'Upload both files to get started'}
       </p>
 
-      {/* Decorative Avatar Circle (CSS-based) */}
-      {/* ... (Keep the avatar HTML exactly the same) ... */}
-      <div className="relative w-28 h-28 md:w-32 md:h-32 rounded-full bg-orange-50 flex items-center justify-center mb-10">
-        <div className="absolute inset-2 rounded-full bg-orange-100/50"></div>
-        <div className="absolute inset-4 rounded-full bg-[#FF5A36]/10"></div>
-        <div className="relative z-10 text-4xl">👩🏻‍🏫</div>
-        <div className="absolute top-2 right-2 w-4 h-4 bg-[#FF5A36] rounded-full border-2 border-white flex items-center justify-center text-[8px] text-white">✓</div>
-        <div className="absolute bottom-4 left-0 w-4 h-4 bg-orange-300 rounded-full border-2 border-white"></div>
+      {/* Replaced CSS Avatar with Real Image */}
+      <div className="relative w-48 h-48 md:w-64 md:h-64 flex items-center justify-center mb-6">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/dashboard.png" alt="Dashboard Illustration" className="w-full h-full object-contain" />
       </div>
 
       {/* Upload Dropzones */}

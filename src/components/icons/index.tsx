@@ -75,7 +75,6 @@ export const ArrowLeftIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-
 export const UploadIcon = ({ className }: { className?: string }) => (
   <svg className={className} width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
@@ -99,7 +98,6 @@ export const XIcon = ({ className }: { className?: string }) => (
   </svg>
 );
 
-
 export const ChevronDownIcon = ({ className }: { className?: string }) => (
   <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
     <polyline points="6 9 12 15 18 9"></polyline>
@@ -121,5 +119,33 @@ export const ZoomInIcon = ({ className }: { className?: string }) => (
 export const ExpandIcon = ({ className }: { className?: string }) => (
   <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
     <path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7" />
+  </svg>
+);
+
+export const RotateIcon = ({ className }: { className?: string }) => (
+  <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path>
+    <polyline points="3 3 3 8 8 8"></polyline>
+  </svg>
+);
+
+export const FitWidthIcon = ({ className }: { className?: string }) => (
+  <svg className={className} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <polyline points="5 9 2 12 5 15"></polyline>
+    <polyline points="19 9 22 12 19 15"></polyline>
+    <line x1="2" y1="12" x2="22" y2="12"></line>
+  </svg>
+);
+
+export const FilterIcon = ({ className }: { className?: string }) => (
+  <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"></polygon>
+  </svg>
+);
+
+export const EditIcon = ({ className }: { className?: string }) => (
+  <svg className={className} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
+    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
   </svg>
 );

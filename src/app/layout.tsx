@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Bricolage_Grotesque } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
+const bricolage = Bricolage_Grotesque({
   subsets: ["latin"],
-  variable: "--font-inter",
+  variable: "--font-bricolage",
   display: "swap",
 });
 
@@ -19,7 +19,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={inter.variable}>
+    <html lang="en" className={bricolage.variable}>
       <body className="antialiased overflow-hidden w-screen h-screen flex">
         {children}
       </body>
