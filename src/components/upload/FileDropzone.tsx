@@ -25,7 +25,7 @@ export function FileDropzone({ type, file, onUpload, onClear }: Props) {
 
   if (file) {
     return (
-      <div className="relative flex items-center justify-center h-32 md:h-40 w-full bg-white border border-gray-100 shadow-sm rounded-2xl p-4 md:p-6 transition-all">
+      <div className="relative flex items-center justify-center h-40 md:h-48 w-full bg-white border border-gray-100 shadow-sm rounded-2xl p-4 md:p-6 transition-all">
         <button 
           onClick={onClear}
           className="absolute -top-2 -right-2 bg-gray-500 hover:bg-gray-700 text-white p-1 rounded-full shadow-sm transition-colors z-10"
@@ -50,7 +50,7 @@ export function FileDropzone({ type, file, onUpload, onClear }: Props) {
   return (
     <div 
       onClick={() => inputRef.current?.click()}
-      className="flex flex-col items-center justify-center h-32 md:h-40 w-full border-2 border-dashed border-gray-200 bg-white rounded-2xl cursor-pointer hover:border-[#FF5A36] hover:bg-orange-50/30 transition-all group"
+      className="flex flex-col items-center justify-center h-40 md:h-48 w-full border-2 border-dashed border-gray-200 bg-white rounded-2xl cursor-pointer hover:border-[#FF5A36] hover:bg-orange-50/30 transition-all group"
     >
       <input 
         type="file" 

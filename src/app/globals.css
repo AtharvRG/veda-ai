@@ -11,6 +11,11 @@
 
 /* Base resets to match the clean design */
 @layer base {
+  html {
+    /* 120% of 16px = 19.2px. This scales ALL Tailwind classes perfectly! */
+    font-size: 19.2px; 
+  }
+  
   body {
     background-color: var(--color-veda-bg);
     color: var(--color-veda-dark);

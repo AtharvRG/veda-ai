@@ -335,6 +335,7 @@ async function mapAndGrade(
             'If a region has no label, fall back to matching by content similarity between the question text and the region text. ' +
             'CRITICAL constraints: each region maps to AT MOST ONE question. Do NOT assign the same region to multiple questions. Do NOT return all regions on a page for one question. ' +
             'Answers may span multiple consecutive regions (e.g. an answer continuing onto the next page) - in that case return all the continuation region IDs. ' +
+            'IMPORTANT GRADING RULE: If an answer maps to multiple regions, evaluate their COMBINED text as a single cohesive answer. DO NOT penalize the student or deduct marks simply because the answer is split across regions or pages. Do NOT mention "split across regions" in the feedback. ' +
             'Only return region IDs from the supplied list - never invent IDs or coordinates. ' +
             'For unanswered questions return an empty answer_region_ids array and 0 marks. ' +
             'Grade fairly out of maxMarks and give concise feedback.',

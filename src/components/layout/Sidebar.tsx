@@ -16,7 +16,7 @@ const navItems = [
 
 export function Sidebar() {
   return (
-    <aside className="hidden md:flex flex-col w-[260px] h-full bg-white rounded-2xl p-4 shadow-sm shrink-0 mr-2">
+    <aside className="hidden md:flex flex-col w-[16.25rem] h-full bg-white rounded-2xl p-4 shadow-sm shrink-0 mr-2">
       {/* Header */}
       <div className="flex items-center justify-between mb-8 px-2">
         <div className="flex items-center gap-2">
@@ -63,14 +63,12 @@ export function Sidebar() {
         {/* School Profile Card */}
         <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-xl">
           <div className="w-10 h-10 bg-white rounded-full flex items-center justify-center shadow-sm shrink-0 border border-gray-100 overflow-hidden">
-             {/* Using a simple placeholder for the badge to avoid external image dependencies */}
-             <div className="w-6 h-6 border-2 border-green-600 rounded-full flex items-center justify-center">
-               <div className="w-2 h-4 border-b-2 border-r-2 border-green-600 transform rotate-45 mb-1" />
-             </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/school.png" alt="School Badge" className="w-8 h-8 object-contain" />
           </div>
           <div className="flex flex-col text-left">
-            <span className="text-sm font-bold leading-tight">Delhi Public School</span>
-            <span className="text-xs text-gray-500">Bokaro Steel City</span>
+            <span className="text-sm font-bold leading-tight">Name of the School/Institute</span>
+            <span className="text-xs text-gray-500">Location</span>
           </div>
         </div>
       </div>

@@ -21,7 +21,7 @@ export function UploadScreen() {
       </p>
 
       {/* Replaced CSS Avatar with Real Image */}
-      <div className="relative w-48 h-48 md:w-64 md:h-64 flex items-center justify-center mb-6">
+      <div className="relative w-30 h-30 md:w-40 md:h-40 flex items-center justify-center mb-6">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/dashboard.png" alt="Dashboard Illustration" className="w-full h-full object-contain" />
       </div>
