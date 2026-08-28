@@ -2,23 +2,34 @@
 import React, { useMemo, useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useExam, QuestionData } from '@/store/ExamContext';
-import { ChevronDownIcon, FilterIcon, EditIcon } from '../icons';
+import { ChevronDownIcon, FilterIcon, EditIcon, XIcon } from '../icons';
 import { cn } from '@/lib/utils';
 
 type FilterType = 'all' | 'answered' | 'unanswered' | 'correct' | 'partial' | 'incorrect';
+
+// Filter option definitions for the drawer
+const filterOptions = [
+  { id: 'all', label: 'All Questions', count: (questions: QuestionData[]) => questions.length },
+  { id: 'answered', label: 'Answered', count: (questions: QuestionData[]) => questions.filter(q => q.answered !== false).length },
+  { id: 'unanswered', label: 'Unanswered', count: (questions: QuestionData[]) => questions.filter(q => q.answered === false).length },
+  { id: 'correct', label: 'Correct', count: (questions: QuestionData[]) => questions.filter(q => q.marksAwarded === q.maxMarks && q.maxMarks > 0).length },
+  { id: 'partial', label: 'Partially Correct', count: (questions: QuestionData[]) => questions.filter(q => q.marksAwarded > 0 && q.marksAwarded < q.maxMarks).length },
+  { id: 'incorrect', label: 'Incorrect', count: (questions: QuestionData[]) => questions.filter(q => q.marksAwarded === 0 && q.answered !== false).length },
+];
 
 export function QuestionList() {
   const { questions, setQuestions, activeQuestionId, setActiveQuestionId, setAnswerFile, setStep } = useExam();
   
   const [filter, setFilter] = useState<FilterType>('all');
   const [expandAll, setExpandAll] = useState(false);
+  const [isFilterDrawerOpen, setIsFilterDrawerOpen] = useState(false);
 
-  // Live Score Tally
+  // Calculate live scoring statistics
   const totalAwarded = useMemo(() => questions.reduce((acc, q) => acc + q.marksAwarded, 0), [questions]);
   const totalMax = useMemo(() => questions.reduce((acc, q) => acc + q.maxMarks, 0), [questions]);
   const percentage = Math.round((totalAwarded / Math.max(1, totalMax)) * 100) || 0;
 
-  // Filter Logic
+  // Apply selected filter to question list
   const filteredQuestions = useMemo(() => {
     return questions.filter(q => {
       if (filter === 'all') return true;
@@ -31,7 +42,7 @@ export function QuestionList() {
     });
   }, [questions, filter]);
 
-  // Keyboard Shortcuts (Up/Down to navigate)
+  // Enable keyboard navigation with arrow keys
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Don't trigger if typing in an input
@@ -53,12 +64,12 @@ export function QuestionList() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [filteredQuestions, activeQuestionId, setActiveQuestionId]);
 
-  // Manual Override Update Handler
+  // Update question data with manual overrides
   const handleUpdateQuestion = (id: string, updates: Partial<QuestionData>) => {
     setQuestions(questions.map(q => q.id === id ? { ...q, ...updates } : q));
   };
 
-  // Real CSV Export
+  // Export filtered questions as CSV
   const handleExportCSV = () => {
     const headers = ["Question Number", "Question Text", "Max Marks", "Marks Awarded", "Status", "AI Feedback"];
     const rows = questions.map(q => {
@@ -79,6 +90,7 @@ export function QuestionList() {
     document.body.removeChild(link);
   };
 
+  // Reset and navigate to upload screen for next student
   const handleNextStudent = () => {
     setAnswerFile(null);
     setActiveQuestionId(null);
@@ -94,22 +106,17 @@ export function QuestionList() {
             Questions <span className="text-gray-400 font-normal text-xs bg-gray-100 px-2 py-0.5 rounded-full">{filteredQuestions.length}</span>
           </h2>
           <div className="flex items-center gap-2">
-            {/* Filter Dropdown */}
-            <div className="relative flex items-center bg-white border border-gray-200 rounded-full px-2 py-1 shadow-sm hover:bg-gray-50 transition-colors">
-              <FilterIcon className="text-gray-400 mr-1" />
-              <select 
-                value={filter} 
-                onChange={(e) => setFilter(e.target.value as FilterType)}
-                className="text-xs font-medium text-gray-600 bg-transparent outline-none cursor-pointer appearance-none pr-2"
-              >
-                <option value="all">All</option>
-                <option value="answered">Answered</option>
-                <option value="unanswered">Unanswered</option>
-                <option value="correct">Correct</option>
-                <option value="partial">Partial</option>
-                <option value="incorrect">Incorrect</option>
-              </select>
-            </div>
+            {/* Filter Button - Opens the drawer */}
+            <button
+              onClick={() => setIsFilterDrawerOpen(!isFilterDrawerOpen)}
+              className="flex items-center gap-1.5 bg-white border border-gray-200 rounded-full px-3 py-1.5 shadow-sm hover:bg-gray-50 transition-all duration-200 text-xs font-medium text-gray-600"
+            >
+              <FilterIcon className="text-gray-400" />
+              <span>{filterOptions.find(f => f.id === filter)?.label || 'Filter'}</span>
+              <motion.span animate={{ rotate: isFilterDrawerOpen ? 180 : 0 }} className="text-gray-400">
+                <ChevronDownIcon className="w-3 h-3" />
+              </motion.span>
+            </button>
             
             <button 
               onClick={() => setExpandAll(!expandAll)}
@@ -119,6 +126,64 @@ export function QuestionList() {
             </button>
           </div>
         </div>
+        
+        {/* Filter Drawer with smooth animations */}
+        <AnimatePresence>
+          {isFilterDrawerOpen && (
+            <motion.div
+              initial={{ opacity: 0, height: 0, y: -10 }}
+              animate={{ opacity: 1, height: 'auto', y: 0 }}
+              exit={{ opacity: 0, height: 0, y: -10 }}
+              transition={{ duration: 0.25, ease: 'easeOut' }}
+              className="overflow-hidden mb-4"
+            >
+              <div className="bg-white rounded-xl border border-gray-100 shadow-lg p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-sm font-bold text-gray-900 uppercase tracking-wide">Filter Questions</h3>
+                  <button
+                    onClick={() => setIsFilterDrawerOpen(false)}
+                    className="p-1 rounded hover:bg-gray-100 transition-colors text-gray-400 hover:text-gray-600"
+                    title="Close"
+                  >
+                    <XIcon className="w-4 h-4" />
+                  </button>
+                </div>
+                <div className="grid grid-cols-2 gap-2">
+                  {filterOptions.map((option) => {
+                    const count = option.count(questions);
+                    const isActive = filter === option.id;
+                    return (
+                      <button
+                        key={option.id}
+                        onClick={() => {
+                          setFilter(option.id as FilterType);
+                          setIsFilterDrawerOpen(false);
+                        }}
+                        className={cn(
+                          "flex items-center gap-2 p-2.5 rounded-lg text-xs font-medium transition-all duration-200 border-2 cursor-pointer group",
+                          isActive 
+                            ? "bg-[#FF5A36]/5 border-[#FF5A36] text-[#FF5A36]" 
+                            : "bg-gray-50/50 border-transparent text-gray-600 hover:bg-gray-100 hover:border-gray-200"
+                        )}
+                        title={option.label}
+                      >
+                        <span className="truncate">{option.label}</span>
+                        <span className={cn(
+                          "px-2 py-0.5 rounded-full text-[10px] font-bold",
+                          isActive 
+                            ? "bg-[#FF5A36]/10 text-[#FF5A36]" 
+                            : "bg-gray-200/50 text-gray-500 group-hover:bg-gray-200"
+                        )}>
+                          {count}
+                        </span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
 
       {/* Scrollable Questions Area */}
@@ -165,7 +230,7 @@ export function QuestionList() {
   );
 }
 
-// Inline Editing Question Card
+// Individual question card with inline editing capabilities
 function QuestionCard({ 
   question, isActive, forceExpand, onClick, onUpdate 
 }: { 
@@ -177,13 +242,10 @@ function QuestionCard({
   
   const isExpanded = isActive || forceExpand;
 
-  // Edit States
   const [isEditingScore, setIsEditingScore] = useState(false);
   const [tempScore, setTempScore] = useState(question.marksAwarded.toString());
-  
-  const [isEditingFeedback, setIsEditingFeedback] = useState(false);
-  const [tempFeedback, setTempFeedback] = useState(question.feedback || '');
 
+  // Save score override with validation
   const saveScore = () => {
     const parsed = parseFloat(tempScore);
     if (!isNaN(parsed) && parsed >= 0 && parsed <= question.maxMarks) {
@@ -192,11 +254,6 @@ function QuestionCard({
       setTempScore(question.marksAwarded.toString());
     }
     setIsEditingScore(false);
-  };
-
-  const saveFeedback = () => {
-    onUpdate({ feedback: tempFeedback });
-    setIsEditingFeedback(false);
   };
 
   return (
@@ -217,7 +274,6 @@ function QuestionCard({
         </div>
         
         <div className="flex items-start gap-3 shrink-0">
-          {/* Editable Score Pill */}
           <div 
             onClick={(e) => { e.stopPropagation(); setIsEditingScore(true); }}
             className={cn(
@@ -255,29 +311,11 @@ function QuestionCard({
         {isExpanded && question.feedback && (
           <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
             <div className="px-4 pb-4 pt-2 ml-12">
-              <div 
-                className="bg-gray-50 rounded-xl p-3 border border-gray-100 cursor-text group relative"
-                onClick={() => setIsEditingFeedback(true)}
-                title="Click to edit feedback"
-              >
+              <div className="bg-gray-50 rounded-xl p-3 border border-gray-100">
                 <div className="flex items-center justify-between mb-1">
                   <h4 className="text-xs font-bold text-gray-900">AI Feedback</h4>
-                  <EditIcon className="text-gray-400 opacity-0 group-hover:opacity-100 transition-opacity w-3 h-3" />
                 </div>
-                
-                {isEditingFeedback ? (
-                  <textarea 
-                    autoFocus
-                    className="w-full text-xs text-gray-800 bg-white border border-gray-300 rounded p-2 outline-none focus:border-[#FF5A36] resize-none"
-                    rows={3}
-                    value={tempFeedback}
-                    onChange={(e) => setTempFeedback(e.target.value)}
-                    onBlur={saveFeedback}
-                    onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveFeedback(); }}}
-                  />
-                ) : (
-                  <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">{question.feedback}</p>
-                )}
+                <p className="text-xs text-gray-600 leading-relaxed whitespace-pre-wrap">{question.feedback}</p>
               </div>
             </div>
           </motion.div>

@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 
+// Configure PDF.js worker for client-side rendering
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
 export function DocumentViewer() {
@@ -24,21 +25,17 @@ export function DocumentViewer() {
   
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Check if the uploaded file is an image instead of a PDF
-  const isImage = useMemo(() => {
-    return answerFile?.type.startsWith('image/') || false;
-  }, [answerFile]);
+  const isImage = useMemo(() => answerFile?.type.startsWith('image/') || false, [answerFile]);
 
-  // Resize Observer for Fit to Width
+  // Track container width for responsive fit-to-width functionality
   useEffect(() => {
     const observer = new ResizeObserver((entries) => {
-      if (entries[0]) setContainerWidth(entries[0].contentRect.width - 40); 
+      if (entries[0]) setContainerWidth(entries[0].contentRect.width - 40);
     });
     if (containerRef.current) observer.observe(containerRef.current);
     return () => observer.disconnect();
   }, []);
 
-// Define the exact shape of our render boxes
   type RenderBox = {
     page: number;
     top: string;
@@ -51,8 +48,8 @@ export function DocumentViewer() {
     index: number;
   };
 
+  // Generate bounding boxes for current page with question metadata
   const boxesToRender = useMemo(() => {
-    // Replace `const boxes: any[] = [];` with our new strict type:
     const boxes: RenderBox[] = [];
     
     questions.forEach(q => {
@@ -72,7 +69,7 @@ export function DocumentViewer() {
     return boxes.sort((a, b) => (a.isTarget === b.isTarget ? 0 : a.isTarget ? 1 : -1));
   }, [questions, activeQuestionId, pageNumber, isImage]);
 
-  // Focus Mode
+  // Auto-focus and navigate to active question's bounding box
   useEffect(() => {
     const activeQuestion = questions.find(q => q.id === activeQuestionId);
     const primaryBox = activeQuestion?.bboxes?.[0] ?? activeQuestion?.bbox;
@@ -90,21 +87,22 @@ export function DocumentViewer() {
     }
   }, [activeQuestionId, questions, pageNumber, isImage]);
 
+  // Create object URL for the uploaded file and handle cleanup
   useEffect(() => {
     if (answerFile) {
       const url = URL.createObjectURL(answerFile);
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setFileUrl(url);
       if (answerFile.type.startsWith('image/')) {
-        setNumPages(1); // Images are always 1 page
+        setNumPages(1);
       }
       return () => URL.revokeObjectURL(url);
     }
   }, [answerFile]);
 
-  function onDocumentLoadSuccess({ numPages }: { numPages: number }) {
+  const onDocumentLoadSuccess = ({ numPages }: { numPages: number }) => {
     setNumPages(numPages);
-  }
+  };
 
   return (
     <div className="h-full flex flex-col bg-[#323232] md:rounded-xl overflow-hidden relative shadow-inner">

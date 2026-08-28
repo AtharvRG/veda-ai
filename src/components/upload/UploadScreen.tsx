@@ -10,6 +10,26 @@ export function UploadScreen() {
   const canStart = questionFile && answerFile;
   const isRetainedMode = questionFile && !answerFile; // True if they clicked "Evaluate Next"
 
+  const loadSampleTests = async () => {
+    try {
+      const [questionResponse, answerResponse] = await Promise.all([
+        fetch('/Questions.pdf'),
+        fetch('/Answers.pdf')
+      ]);
+      
+      const questionBlob = await questionResponse.blob();
+      const answerBlob = await answerResponse.blob();
+      
+      const questionFile = new File([questionBlob], 'Questions.pdf', { type: 'application/pdf' });
+      const answerFile = new File([answerBlob], 'Answers.pdf', { type: 'application/pdf' });
+      
+      setQuestionFile(questionFile);
+      setAnswerFile(answerFile);
+    } catch (error) {
+      console.error('Failed to load sample tests:', error);
+    }
+  };
+
   return (
     <div className="flex flex-col items-center justify-center w-full max-w-4xl mx-auto py-12 px-4 h-full">
       {/* Title */}
@@ -25,6 +45,15 @@ export function UploadScreen() {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/dashboard.png" alt="Dashboard Illustration" className="w-full h-full object-contain" />
       </div>
+
+      {!isRetainedMode && (
+        <button
+          onClick={loadSampleTests}
+          className="mb-6 px-4 py-2 text-sm font-medium text-[#FF5A36] bg-[#FF5A36]/10 border border-[#FF5A36]/20 rounded-lg hover:bg-[#FF5A36]/20 hover:border-[#FF5A36]/30 transition-all duration-300"
+        >
+          Load Sample Tests
+        </button>
+      )}
 
       {/* Upload Dropzones */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6 w-full max-w-2xl bg-white/50 backdrop-blur-sm p-4 md:p-6 rounded-3xl border border-gray-100 shadow-sm">

@@ -67,7 +67,7 @@ export function ExtractingScreen() {
             Extracting & Grading...
           </motion.h2>
           <motion.p initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }} className="text-gray-500 text-sm text-center">
-            Mistral AI is mapping answers and evaluating scores.<br/>This may take 10-20 seconds.
+            Mistral AI is mapping answers and evaluating scores.<br/>This may take few moments.
           </motion.p>
         </>
       )}
